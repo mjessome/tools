@@ -1,9 +1,11 @@
 import time
+from functools import wraps
+import traceback
 
 import logging
 log = logging.getLogger(__name__)
 
-def retry(action, attempts=5, sleeptime=0, retry_exceptions=(Exception,),
+def retry(action, attempts=5, sleeptime=60, retry_exceptions=(Exception,),
           cleanup=None, args=(), kwargs={}):
     """Call `action' a maximum of `attempts' times until it succeeds,
         defaulting to 5. `sleeptime' is the number of seconds to wait
@@ -21,18 +23,38 @@ def retry(action, attempts=5, sleeptime=0, retry_exceptions=(Exception,),
     n = 1
     while n <= attempts:
         try:
-            log.info("Calling %s with args: %s, kwargs: %s, attempt #%d" % \
+            log.info("retry: Calling %s with args: %s, kwargs: %s, attempt #%d" % \
               (action, str(args), str(kwargs), n))
             return action(*args, **kwargs)
         except retry_exceptions:
+            log.debug("retry: Caught exception: ", exc_info=True)
             if cleanup:
                 cleanup()
             if n == attempts:
-                log.info("Giving up on %s" % action)
+                log.info("retry: Giving up on %s" % action)
                 raise
             if sleeptime > 0:
-                log.info("Failed, sleeping %d seconds before retrying" % sleeptime)
+                log.info("retry: Failed, sleeping %d seconds before retrying" % sleeptime)
                 time.sleep(sleeptime)
             continue
         finally:
             n += 1
+
+def retriable(*retry_args, **retry_kwargs):
+    ''' A decorator for retry(). Example usage:
+    @retriable()
+    def foo()
+        ...
+
+    @retriable(attempts=100, sleeptime=10)
+    def bar():
+        ...
+    '''
+
+    def _retriable_factory(func):
+        @wraps(func)
+        def _retriable_wrapper(*args, **kwargs):
+            return retry(func, *retry_args, args=args, kwargs=kwargs,
+                         **retry_kwargs)
+        return _retriable_wrapper
+    return _retriable_factory
